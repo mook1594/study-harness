@@ -1,10 +1,15 @@
-# 개발 가이드 (C#/.NET + TDD)
+# 개발 가이드 (C#/.NET + TDD | Vue/Nuxt 디자인 플로우)
 
 ## 기술 스택
 - Language: C# (.NET 8+)
 - Test: xUnit
 - Build: `dotnet build`
 - Test: `dotnet test`
+
+### 프론트엔드 (디자인 플로우)
+- Framework: Vue 3 / Nuxt
+- Styling: Tailwind CSS + CSS Custom Properties
+- 디자인 토큰: tokens/colors.ts → tokens/semantic.ts → tailwind.config.ts
 
 ## TDD 개발 플로우
 

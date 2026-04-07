@@ -61,4 +61,7 @@ brainstorm → spec → design-decision → mockup → component → tokens → 
 | component | `skills/component/SKILL.md` |
 | tokens | `skills/tokens/SKILL.md` |
 
-스킬 파일을 Read 도구로 읽은 뒤, 해당 스킬의 실행 순서를 **`$ARGUMENTS`의 feature 이름을 대입하여** 그대로 수행한다.
+스킬 파일을 Read 도구로 읽은 뒤, 해당 스킬의 실행 순서를 수행한다.
+이때 스킬 내의 `$ARGUMENTS` 는 **파싱된 feature 이름만** 전달한다 (`--step` 플래그 제외).
+
+예: `/design-flow user-profile --step spec` 으로 호출 시, 스킬에는 `user-profile` 만 전달.
