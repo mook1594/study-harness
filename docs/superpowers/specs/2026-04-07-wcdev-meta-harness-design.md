@@ -356,6 +356,226 @@ tracks/<track-name>/
 - 자동 main 머지·자동 배포
 - 트랙 버전 관리·의존성 해소 (지금은 단순 복사)
 
+## 리뷰 결정 (2026-04-07)
+
+원본 설계에 대한 리뷰 세션에서 정정·보강된 사항. 본문과 충돌 시 이 섹션이 우선한다.
+
+### R1. `.harness/state.json` 스키마 확정
+
+```json
+{
+  "schema_version": 1,
+  "run_id": "2026-04-07T14-22-08",
+  "product_idea": "...",
+  "status": "running | awaiting_human | done",
+  "phase": {
+    "id": "phase-3",
+    "index": 3,
+    "use_case": "사용자가 할 일을 추가한다",
+    "step": "contract-slice | fanout | join | verify-a | verify-b | verify-c | verify-d | verify-e | done",
+    "attempts": { "backend": 1, "frontend": 0 }
+  },
+  "human_gates": {
+    "requirements_done": true,
+    "design_done": true,
+    "contracts_approved": true
+  },
+  "bootstrap": { "scaffold_done": true },
+  "contract_hashes": {
+    "docs/product/prd.md": "sha256:...",
+    "docs/domain/model.md": "sha256:...",
+    "docs/architecture/monorepo.md": "sha256:...",
+    "contracts/openapi.yaml": "sha256:..."
+  },
+  "escalation": {
+    "reason": "verify-d E2E failed",
+    "raised_at": "2026-04-07T15:01:33Z"
+  },
+  "last_updated": "..."
+}
+```
+
+- `step`은 phase-runner 내부 단계까지 노출, `fanout`은 단일 step (트랙별 진행은 `attempts`)
+- `status: done`은 전체 phase 완주만, phase 종료는 `step=done` + `index` 증가
+- `attempts`는 트랙별 카운터
+
+### R2. Escalation 메커니즘
+
+- **전달**: `status: awaiting_human` + `escalation` 필드 + `.harness/runs/<ts>/<phase>/ESCALATION.md`(실패 단계, 트랙 report, 재현 명령, 추천 조치) 작성 후 **세션 종료** (state.json 잔존)
+- **재개**: `/wcdev` 재호출 시 `awaiting_human`이면 `ESCALATION.md` 보여주고 1회 질문
+  - 선택지: `retry | resume | discard | redecompose | abort`
+  - `retry`: 실패 step부터, `attempts` 리셋
+  - `resume`: 워킹트리 변경분 유지, 같은 phase 진입점부터
+  - `discard`: `git stash push -u -m "wcdev-discard-<run_id>"` 후 phase 처음부터
+  - `redecompose`: phase 리스트 재생성 (R8 참조)
+  - `abort`: 종료
+- **트리거**: §5 [a] 2회 초과 / §5 [b][c] 1회 초과 / §5 [d] 즉시 / 트랙 `blocked` / 타임아웃 / `track silent`(report 부재) / scaffold 실패 / 4종 파일 drift / 코어↔트랙 버전 drift / 워킹트리 dirty 진입
+- **타임아웃**: 기본 30분, `phases.json` 항목별 override
+
+### R3. 디자인 단계 분리 (구조 변경)
+
+기존 §3·§4-B의 "phase마다 design/brainstorm/mockup 반복"을 폐기. 디자인은 **사전 1회성 단계**.
+
+**새 마스터 흐름**
+```
+[1] 요구사항 대화 (사람)
+[2] 계약 4종 생성 (자율)
+[2.1] scaffold (자율, 전용 스킬) — phase 0 폐기, 별도 단계로 분리
+[2.5] /design-flow 위임 (사람)
+[3] phase 분해 (자율)
+[4] 승인 게이트 (사람)
+[5] phase 루프 (자율, phase 1~N)
+[6] 종료
+```
+
+- 사람 개입 **3회**: 요구사항 / 디자인 / 계약+phase 승인
+- 디자인 산출물: `docs/design/`, `tokens/` (전체), `packages/ui/` (핵심 primitive만 — Button/Input/Card 등)
+- 디자인 단계 완료 판정: `/design-flow` 종료 + `tokens/`·`packages/ui/` 존재 확인
+- §4-B 프론트 트랙 4단계로 축소: `plan → write-tests → implement → self-verify`
+- `packages/ui/`, `tokens/`는 phase 트랙에서 **읽기 전용**
+- phase 중 신규 컴포넌트는 `apps/web/` 내부 phase-local. `packages/ui` 승격은 사람 판단(비목표)
+- (열린 질문) "프론트 design 단계 종료 조건"은 본 변경으로 해소
+
+### R4. Scaffold 단계 (phase 0 대체)
+
+- 전용 스킬 `core/skills/scaffold`
+- 작업: 디렉토리 생성, `dotnet new webapi`, `nuxi init`, `pnpm-workspace.yaml`, `tools/gen-*.sh`, 빈 `/health` 엔드포인트, 빈 codegen 1회, Playwright chromium 설치
+- 게이트: `dotnet build` ok, `pnpm -w build` ok, codegen 산출물 존재, `playwright --version` 확인
+- 첫 commit: `chore: scaffold monorepo`
+- state: `bootstrap.scaffold_done`
+- 실패 시 일반 escalation 경로 동일 처리
+- phase-runner는 "OpenAPI 슬라이스 있는 phase"만 담당 (phase 1부터)
+
+### R5. Contract slice 추출
+
+`phases.json` 항목:
+```json
+{
+  "id": "phase-3",
+  "use_case": "사용자가 할 일을 추가한다",
+  "operations": ["createTodo", "listTodos"],
+  "domain_entities": ["Todo"],
+  "timeout_minutes": 30
+}
+```
+
+- 추출 도구: 별도 스크립트 `tools/extract-slice.sh`
+- 출력: `.harness/runs/<ts>/<phase>/contract-slice.yaml` (path item + 트랜지티브 schema 클로저)
+- 트랙 서브에이전트는 슬라이스만 입력, **원본 `contracts/openapi.yaml` 접근 금지**
+- §5 [a] 정합성 검증은 마스터가 원본 기준으로 수행
+
+### R6. Codegen 실행 주체 (이중 실행, 의도된 동작)
+
+| 시점 | 주체 | 입력 | 출력 |
+|---|---|---|---|
+| `write-tests` 진입 | 트랙 | `contract-slice.yaml` | `apps/api/src/Api.Generated/`, `packages/shared-types/src/api.ts` (commit) |
+| §5 [a] 검증 | 마스터 | 원본 `openapi.yaml` | `.harness/runs/<ts>/<phase>/codegen-check/` (보존) |
+
+- 산출물은 git **commit** (diff 검증을 위해)
+- `pre-tool-use` hook으로 트랙 외부의 산출물 경로 쓰기 차단
+- `.gitattributes`에 `linguist-generated` 표시
+- §5 [a] diff = 0 강제, ≠ 0이면 escalation
+
+### R7. 커밋 전략
+
+- 트랙 hook은 build/test만, **git 명령 금지** (문서 + `pre-tool-use` hook 이중 차단)
+- phase 시작 시 워킹트리 dirty면 escalation
+- 트랙은 커밋 안 함, 워킹트리에 변경 누적
+- §5 [a]~[d] 통과 후 마스터가 1회 커밋:
+  - 명시적 add (트랙별 `workdir_globs` + codegen output 경로만)
+  - `phase N: <use case> — TDD green + integration ok`
+- 검증 실패 시 워킹트리 보존 + escalation
+
+### R8. `git_guard` hook
+
+- `core/hooks/pre-tool-use/git_guard.py`, `settings.json` 등록
+- **책임 1: main 보호** — 현재 브랜치가 `main`이면 변경성 git 명령 거부, 읽기는 허용
+- **책임 2: 트랙 git 차단** — phase-runner가 트랙 Task 호출 시 `WCDEV_TRACK=<name>` 주입, hook이 변수 있으면 모든 변경성 git 명령 거부
+- **자동 브랜치 생성**: `/wcdev` 시작 시 `feature/wcdev-<run_id>` 자동 체크아웃
+- **bypass 차단**: `--no-verify`, `core.hooksPath` 우회 시도 거부
+
+### R9. 재개 시 미커밋 변경분 처리
+
+- `git status --porcelain` 확인
+- clean: 마지막 step부터 재개
+- dirty: escalation 경로로 통합 (R2의 `retry | resume | discard | redecompose | abort`)
+- `status: running` 상태로 재호출 발견 시 phase-runner가 자동으로 `awaiting_human` 전환 (`reason: unclean shutdown`)
+- `status: done + dirty`: 메시지만 출력 후 종료, 자동 행동 없음
+- discard 시 stash에 untracked 포함
+
+### R10. Playwright 환경 부트스트랩 (§5 [d] 보강)
+
+- **DB**: 요구사항 대화에서 결정 (디폴트 SQLite). `tools/db-provision.sh`/`db-teardown.sh` 추상화로 phase-runner는 DB 종류 모름. scaffold가 선택에 맞는 provisioner 설치. Postgres 선택 시 `install.sh` 사전 점검에 `docker` 추가. phase 1개 = 격리된 DB 인스턴스 1개. connection string은 환경변수로만 주입.
+- **포트**: `ASPNETCORE_URLS=http://127.0.0.1:0` → OS 할당, stdout 파싱
+- **health check**: scaffold가 `/health` 자동 추가, verify-d 진입 시 200까지 폴링(최대 30초)
+- **종료 보장**: PID 파일 + bash trap, 다음 phase 진입 시 잔존 PID도 kill
+- **E2E 작성 주체**: 마스터, `.harness/runs/<ts>/<phase>/e2e.spec.ts`
+- **Playwright**: scaffold에서 chromium만 설치, cross-browser 비목표
+
+### R11. 동시성/잠금
+
+- **층 1**: 디렉토리 경계 (기존 `workdir_globs`)
+- **층 2**: 루트 공유 파일 쓰기 금지 — `pnpm-lock.yaml`, 루트 `package.json`, `pnpm-workspace.yaml`, `.gitignore`, `README.md`, `.harness/**`, `contracts/**`, `tokens/**`, `packages/ui/**`
+- **층 3**: 의존성 추가는 트랙이 직접 (`dotnet add package`, `pnpm add` in `apps/web/`). `pnpm-lock.yaml` 쓰기 권한은 프론트 트랙만. join 후 마스터가 lockfile 일관성 검사
+- **층 4**: report 파일 경로 분리. state.json은 마스터 전용, 트랙은 읽기도 금지
+- 신설 hook: `core/hooks/pre-tool-use/workdir_guard.py` — 트랙 컨텍스트에서 금지 경로 쓰기 거부
+
+### R12. 작업 디렉토리 경계의 진실 공급원
+
+- `plugin.json.workdir_globs`가 진실 공급원, `monorepo.md`는 파생 문서
+- scaffold/install.sh가 `monorepo.md`의 마커 블록 자동 생성, 마커 외부는 사람 영역 (아키텍처 의도/결정)
+- §5 [a]에 `monorepo.md` 마커 ↔ `plugin.json` drift 검사 추가
+
+### R13. PRD/계약 변경 시 재phase 분해
+
+- `state.json.contract_hashes`에 4종 파일 해시 기록 (scaffold/계약 생성 시점)
+- 매 phase 진입 시 해시 비교, drift 발견 시 escalation
+- 선택지: `redecompose | continue | abort`
+- `redecompose`: use_case + operations 정확 매칭이면 `done` 유지, 부분 일치면 escalation으로 사람 결정
+- `monorepo.md`는 마커 블록을 placeholder로 치환 후 해싱
+
+### R14. 서브에이전트 컨텍스트 폭발
+
+- 타임아웃 = blocked → escalation
+- 트랙 시스템 프롬프트에 보고 의무 명시: 종료 전 `report_path` JSON 작성, 컨텍스트 부족 시 `status: blocked` 자진 보고
+- 마스터 폴백 판정:
+  - report 정상 → join
+  - `status: blocked` → escalation (`track blocked`)
+  - report 부재 → escalation (`track silent`, 워킹트리 변경분 첨부)
+- 부분 산출물은 R9 경로로 처리
+
+### R15. install.sh 멱등성/제거
+
+- 멱등 install: 마커 블록만 교체, `installed-tracks.json` 버전 비교 후 같으면 no-op
+- `--uninstall-track <name>`: `~/.claude/` 측 트랙 산출물·마커·등록 제거, 프로젝트 `tracks/<name>/`는 보존
+- `--uninstall`: 코어 + 모든 트랙 제거, `~/.claude/.wcdev/` 삭제, `settings.json`은 wcdev hook만 제거, 프로젝트 `.harness/`는 보존
+- 사전 점검: install 시 binaries 확인, uninstall 시 `status: running` 세션 있으면 거부 (force 없음)
+
+### R16. Windows 지원
+
+- macOS/Linux만 공식 지원, Windows는 WSL2 우회
+- README 시스템 요구사항 명시
+- install.sh가 비POSIX 셸 감지 시 경고만 출력 후 진행
+- 비목표에 "Windows 네이티브 지원" 추가
+
+### R17. 코어 ↔ 트랙 버전 호환성
+
+- 코어 버전: `core/VERSION` (semver)
+- 트랙: `plugin.json.requires.core`에 semver range
+- install.sh: 트랙 설치 시 코어 호환 검증, 불만족 거부 (force 없음)
+- 코어 업그레이드 시 모든 트랙 재검증, 비호환 트랙은 비활성화 표시 + 사용자 보고
+- phase-runner 부트 시 `installed-tracks.json` ↔ 현재 코어 재검증, drift 시 escalation
+- 코어 인터페이스 면적: `plugin.json` 스키마, phase-runner 호출 규약, hook 인터페이스
+- 0.x 단계는 minor 증가도 breaking 가능
+
+### R18. 사소한 정정
+
+- §3 [5] 의사코드 "통합 검증 (5장)" → `§5` 표기 통일
+- 재시도 명칭 분리: `green-loop budget` (트랙 내부 §4-A 5회) vs `phase retry budget` (§5 1~2회)
+- §6-2 CLAUDE.md 트랙 마커 블록에 "install.sh가 채움" 주석 추가
+
+---
+
 ## 열린 질문 (구현 계획 단계에서 결정)
 
 - `.harness/state.json` 정확한 스키마
