@@ -17,6 +17,10 @@ agent: Sonnet
 - `docs/design/$ARGUMENTS/design.md` 읽기
 - `docs/design/$ARGUMENTS/components.md` 읽기
 
+파일이 없으면:
+- `design.md` 없음 → "design-decision 단계를 먼저 완료해 주세요. `/design-decision $ARGUMENTS`" 안내 후 종료
+- `components.md` 없음 → "component 단계를 먼저 완료해 주세요. `/component $ARGUMENTS`" 안내 후 종료
+
 ### 2단계: 기존 토큰 파일 확인
 
 `tokens/` 디렉토리가 존재하면 기존 `colors.ts`, `semantic.ts` 를 읽어 병합 대상 확인.
@@ -84,23 +88,12 @@ export default {
 } satisfies Config
 ```
 
-### 4단계: state.json 최종 업데이트
+### 4단계: state.json 업데이트
 
-```json
-{
-  "feature": "$ARGUMENTS",
-  "current_step": "done",
-  "completed": ["brainstorm", "spec", "design-decision", "mockup", "component", "tokens"],
-  "artifacts": {
-    "brainstorm": "docs/design/$ARGUMENTS/brainstorm.md",
-    "spec": "docs/design/$ARGUMENTS/spec.md",
-    "design-decision": "docs/design/$ARGUMENTS/design.md",
-    "mockup": "docs/design/$ARGUMENTS/mockup/",
-    "component": "docs/design/$ARGUMENTS/components.md",
-    "tokens": "tokens/"
-  }
-}
-```
+기존 `docs/design/$ARGUMENTS/state.json` 을 읽어 아래 항목만 업데이트한다:
+- `completed` 배열에 `"tokens"` 추가 (기존 값 유지)
+- `current_step` → `"done"`
+- `artifacts.tokens` → `"tokens/"`
 
 ### 5단계: 완료 안내
 

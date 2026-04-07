@@ -19,6 +19,10 @@ agent: Sonnet
 - `docs/design/$ARGUMENTS/design.md`
 - `docs/design/$ARGUMENTS/spec.md`
 
+파일이 없으면:
+- `mockup/*.html` 없음 → "mockup 단계를 먼저 완료해 주세요. `/mockup $ARGUMENTS`" 안내 후 종료
+- `design.md` 없음 → "design-decision 단계를 먼저 완료해 주세요. `/design-decision $ARGUMENTS`" 안내 후 종료
+
 ### 2단계: 컴포넌트 분리 분석
 
 HTML 목업을 분석하여 재사용 가능한 컴포넌트 단위를 식별한다.

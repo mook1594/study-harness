@@ -18,7 +18,9 @@ agent: Sonnet
 - `docs/design/$ARGUMENTS/spec.md`
 - `docs/design/$ARGUMENTS/design.md`
 
-파일이 없으면 해당 단계 먼저 완료하도록 안내하고 종료.
+파일이 없으면:
+- `spec.md` 없음 → "spec 단계를 먼저 완료해 주세요. `/spec $ARGUMENTS`" 안내 후 종료
+- `design.md` 없음 → "design-decision 단계를 먼저 완료해 주세요. `/design-decision $ARGUMENTS`" 안내 후 종료
 
 ### 2단계: 화면별 목업 생성
 
@@ -128,10 +130,12 @@ docs/design/$ARGUMENTS/mockup/
 
 ### 4단계: state.json 업데이트 및 완료 안내
 
-- `completed` 에 `"mockup"` 추가
+기존 `docs/design/$ARGUMENTS/state.json` 을 읽어 아래 항목만 업데이트한다:
+- `completed` 배열에 `"mockup"` 추가 (기존 값 유지)
 - `current_step` → `"component"`
 - `artifacts.mockup` → `"docs/design/$ARGUMENTS/mockup/"`
 
+완료 안내:
 ```
 ✅ mockup 완료 → docs/design/$ARGUMENTS/mockup/
 
