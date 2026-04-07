@@ -73,7 +73,7 @@ fi
 
 # Skills 설치 (슬래시 커맨드)
 mkdir -p "$CLAUDE_DIR/skills"
-for skill in plan review commit; do
+for skill in plan review commit brainstorm spec design-decision mockup component tokens design-flow; do
   SRC="$SCRIPT_DIR/skills/$skill"
   DEST="$CLAUDE_DIR/skills/$skill"
   if [ -d "$SRC" ]; then
@@ -94,3 +94,10 @@ echo "  - C#/.NET 자동 빌드/테스트 (PostToolUse Write|Edit → edit_lint_
 echo "  - /plan  : TDD 구현 계획 작성"
 echo "  - /review: 코드 리뷰"
 echo "  - /commit: 커밋 메시지 생성 및 커밋"
+echo "  - /brainstorm     : 기능 분석 및 브레인스토밍"
+echo "  - /spec           : 기능 스펙 문서 작성"
+echo "  - /design-decision: 컬러/타이포/간격 결정"
+echo "  - /mockup         : HTML/CSS 인터랙티브 목업"
+echo "  - /component      : Vue 컴포넌트 생성"
+echo "  - /tokens         : 디자인 토큰 추출"
+echo "  - /design-flow    : 전체 디자인 플로우 오케스트레이터"
